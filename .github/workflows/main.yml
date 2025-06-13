@@ -15,25 +15,45 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v3
 
-      # Step 2: Set up Node.js
+      # Step 2: Set up Node.js and build Angular app
       - name: Set up Node.js
         uses: actions/setup-node@v3
         with:
           node-version: '16'
 
-      # Step 3: Install Angular CLI (optional but safe)
-      - name: Install Angular CLI
-        run: npm install -g @angular/cli
-
-      # Step 4: Install dependencies
       - name: Install dependencies
         run: npm install
 
-      # Step 5: Build Angular project with correct base href
-      - name: Build Angular project
+      - name: Add IIS web.config file
+        run: |
+          mkdir -p src
+          cat <<EOF > src/web.config
+          <?xml version="1.0" encoding="utf-8"?>
+          <configuration>
+            <system.webServer>
+              <rewrite>
+                <rules>
+                  <rule name="Angular Routes" stopProcessing="true">
+                    <match url=".*" />
+                    <conditions logicalGrouping="MatchAll">
+                      <add input="{REQUEST_FILENAME}" matchType="IsFile" negate="true" />
+                      <add input="{REQUEST_FILENAME}" matchType="IsDirectory" negate="true" />
+                    </conditions>
+                    <action type="Rewrite" url="/my-angular9-app/index.html" />
+                  </rule>
+                </rules>
+              </rewrite>
+              <staticContent>
+                <mimeMap fileExtension=".json" mimeType="application/json" />
+              </staticContent>
+            </system.webServer>
+          </configuration>
+          EOF
+
+      - name: Build Angular project with base-href
         run: ng build --prod --base-href /my-angular9-app/
 
-      # Step 6: Upload build files to AWS S3
+      # Step 3: Upload build files to AWS S3
       - name: Upload to S3
         uses: jakejarvis/s3-sync-action@v0.5.1
         with:
@@ -45,15 +65,15 @@ jobs:
           AWS_REGION: "eu-north-1"
           SOURCE_DIR: "dist/my-angular9-app"
 
-      # Step 7: Deploy to IIS server via AWS SSM
+      # Step 4: Deploy to IIS via AWS SSM
       - name: Deploy to IIS via AWS SSM
         run: |
-          echo "Sending SSM command to sync build to IIS..."
+          echo "Sending SSM command to deploy build to IIS..."
           aws ssm send-command \
             --instance-ids "${{ secrets.AWS_INSTANCE_ID }}" \
             --document-name "AWS-RunPowerShellScript" \
             --comment "Deploy Angular build to IIS" \
-            --parameters '{"commands":["aws s3 sync s3://${{ secrets.AWS_S3_BUCKET }}/ C:\\inetpub\\wwwroot\\my-angular9-app --delete"]}' \
+            --parameters '{"commands":["& \"C:\\Program Files\\Amazon\\AWSCLIV2\\aws.exe\" s3 sync s3://${{ secrets.AWS_S3_BUCKET }}/ C:\\inetpub\\wwwroot\\my-angular9-app /E /PURGE"]}' \
             --region eu-north-1
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY }}
