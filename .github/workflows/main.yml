@@ -1,0 +1,54 @@
+name: Deploy Angular App to AWS IIS (No SSH)
+
+on:
+  push:
+    branches:
+      - main  # Trigger deployment on push to main
+  workflow_dispatch:  # Allows manual trigger
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      # Step 1: Checkout the repository
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      # Step 2: Set up Node.js and build Angular app
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '16'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build Angular project
+        run: npm run build --configuration=production
+
+      # Step 3: Upload build files to AWS S3
+      - name: Upload to S3
+        uses: jakejarvis/s3-sync-action@v0.5.1
+        with:
+          args: --follow-symlinks --delete  # Remove --acl public-read if bucket ACLs are disabled
+        env:
+          AWS_S3_BUCKET: ${{ secrets.AWS_S3_BUCKET }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_KEY }}
+          AWS_REGION: "eu-north-1"
+          SOURCE_DIR: "dist/my-angular9-app"
+
+      # Step 4: Deploy to IIS via AWS SSM (Fixed Region).
+      - name: Deploy to IIS via AWS SSM
+        run: |
+          echo "Sending SSM command to deploy build to IIS..."
+          aws ssm send-command \
+            --instance-ids "${{ secrets.AWS_INSTANCE_ID }}" \
+            --document-name "AWS-RunPowerShellScript" \
+            --comment "Deploy Angular build to IIS" \
+            --parameters '{"commands":["& \"C:\\Program Files\\Amazon\\AWSCLIV2\\aws.exe\" s3 sync s3://${{ secrets.AWS_S3_BUCKET }}/ C:\\inetpub\\wwwroot\\my-angular9-app"]}' \
+            --region eu-north-1
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_KEY }}
